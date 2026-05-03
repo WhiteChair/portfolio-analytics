@@ -1045,21 +1045,28 @@ return {
         );
       }
 
+      // Helper to determine underlying currency
+      const getUnderlyingCurrencyForItem = (item) => {
+        const nameLower = (item.name || '').toLowerCase();
+        if (nameLower.includes('s&p 500') || nameLower.includes('s&p500')) return 'USD';
+        if (item.isin?.startsWith('US')) return 'USD';
+        if (nameLower.includes('ultrashort') && nameLower.includes('usd')) return 'USD';
+        if (nameLower.includes('developed world')) return 'MIXED_60USD';
+        if (nameLower.includes('emerging')) return 'MIXED_30USD';
+        return item.currency || 'EUR';
+      };
+
       const getUpdatedPortfolio = () => {
-        // Bank CSV values (mktVal) are ALREADY in EUR - no conversion needed
-        // Only apply FX scenario for "what if" analysis, not for base values
-        const scenarioFxRate = fxRate * (1 + fxScenario / 100);
-        
+        // Bank CSV "Mkt Val" column is ALREADY in EUR - use it directly!
+        // FX scenario slider simulates "what if EUR strengthens/weakens"
         return portfolioData.map(item => {
-          // Base case: CSV values are already in EUR, use as-is
+          // Start with the EUR value from CSV
           let liveValue = item.mktVal;
           
-          // Only apply FX scenario adjustment for USD-underlying positions
-          // This is for "what if EUR strengthens/weakens" simulation
+          // Only adjust if user moves the FX scenario slider
           if (fxScenario !== 0) {
             const underlying = getUnderlyingCurrencyForItem(item);
             if (underlying === 'USD') {
-              // Simulate: if EUR weakens (fxScenario > 0), USD assets worth more in EUR
               liveValue = item.mktVal * (1 + fxScenario / 100);
             } else if (underlying === 'MIXED_60USD') {
               liveValue = item.mktVal * (1 + (fxScenario * 0.6) / 100);
@@ -1071,23 +1078,11 @@ return {
           return { ...item, liveValue, liveCurrency: 'EUR' };
         });
       };
-      
-      // Helper to determine underlying currency (moved before getUpdatedPortfolio uses it)
-      const getUnderlyingCurrencyForItem = (item) => {
-        const nameLower = (item.name || '').toLowerCase();
-        if (nameLower.includes('s&p 500') || nameLower.includes('s&p500')) return 'USD';
-        if (item.isin?.startsWith('US')) return 'USD';
-        if (nameLower.includes('ultrashort') && nameLower.includes('usd')) return 'USD';
-        if (nameLower.includes('developed world')) return 'MIXED_60USD';
-        if (nameLower.includes('emerging')) return 'MIXED_30USD';
-        return item.currency || 'EUR';
-      };
 
       const updatedPortfolio = getUpdatedPortfolio();
       
       // Calculate totals - including UNDERLYING currency exposure
       // Some EUR-denominated funds (like Vanguard S&P 500) hold USD assets
-      // (getUnderlyingCurrencyForItem is defined above)
       
       const totals = (() => {
         const totalValue = updatedPortfolio.reduce((sum, item) => sum + (item.liveValue || item.mktVal), 0);
