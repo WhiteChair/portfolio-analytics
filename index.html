@@ -916,11 +916,18 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
           }
           
           // Last resort: hardcoded fallback
-          setLoadingStatus('Using cached data (all APIs unavailable)...');
-          setUsingFallback(true);
-          return generateFallbackData(uniqueIsins);
-        }
-      };
+         setLoadingStatus('Using CSV data (APIs unavailable)...');
+setUsingFallback(true);
+return {
+  securities: {}, // Empty = will use CSV mktVal
+  eurUsd: csvFxRate || fxRate,
+  benchmark: benchmarkData || generateBenchmarkData()
+};
+          const csvFxRate = (() => {
+  const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
+  return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
+})();
+          
 
       const handleFile = useCallback(async (file) => {
         if (!file) return;
