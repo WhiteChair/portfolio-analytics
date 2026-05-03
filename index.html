@@ -1045,34 +1045,11 @@ return {
         );
       }
 
-    const getUpdatedPortfolio = () => {
+  const getUpdatedPortfolio = () => {
   const scenarioFxRate = fxRate * (1 + fxScenario / 100);
   
   return portfolioData.map(item => {
-    // For Cash: just use CSV value (already EUR)
-    if (item.type === 'Cash') {
-      return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
-    }
-    
-    // For non-Cash items: check for live data
-    const live = liveData?.[item.isin];
-    if (live && item.quantity) {
-      let valueEur = live.price * item.quantity;
-      if (live.currency === 'USD') {
-        valueEur = valueEur / scenarioFxRate;
-      }
-      return {
-        ...item,
-        livePrice: live.price,
-        liveCurrency: live.currency,
-        liveValue: valueEur,
-        dividendYield: live.dividendYield,
-        high52w: live.high52w,
-        low52w: live.low52w,
-      };
-    }
-    
-    // No live data: use CSV value (already EUR)
+    // CSV values are already in EUR, use them as-is
     return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
   });
 };
