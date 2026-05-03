@@ -1046,52 +1046,48 @@ return {
       }
 
       const getUpdatedPortfolio = () => {
+        // Bank CSV values (mktVal) are ALREADY in EUR - no conversion needed
+        // Only apply FX scenario for "what if" analysis, not for base values
         const scenarioFxRate = fxRate * (1 + fxScenario / 100);
         
         return portfolioData.map(item => {
-          const live = liveData?.[item.isin];
-          if (live && item.quantity) {
-            let valueEur = live.price * item.quantity;
-            if (live.currency === 'USD') {
-              valueEur = valueEur / scenarioFxRate;
+          // Base case: CSV values are already in EUR, use as-is
+          let liveValue = item.mktVal;
+          
+          // Only apply FX scenario adjustment for USD-underlying positions
+          // This is for "what if EUR strengthens/weakens" simulation
+          if (fxScenario !== 0) {
+            const underlying = getUnderlyingCurrencyForItem(item);
+            if (underlying === 'USD') {
+              // Simulate: if EUR weakens (fxScenario > 0), USD assets worth more in EUR
+              liveValue = item.mktVal * (1 + fxScenario / 100);
+            } else if (underlying === 'MIXED_60USD') {
+              liveValue = item.mktVal * (1 + (fxScenario * 0.6) / 100);
+            } else if (underlying === 'MIXED_30USD') {
+              liveValue = item.mktVal * (1 + (fxScenario * 0.3) / 100);
             }
-            return {
-              ...item,
-              livePrice: live.price,
-              liveCurrency: live.currency,
-              liveValue: valueEur,
-              dividendYield: live.dividendYield,
-              high52w: live.high52w,
-              low52w: live.low52w,
-            };
           }
           
-          if (item.currency === 'USD') {
-            return { ...item, liveValue: item.mktVal / scenarioFxRate, liveCurrency: 'EUR' };
-          }
-          return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
+          return { ...item, liveValue, liveCurrency: 'EUR' };
         });
+      };
+      
+      // Helper to determine underlying currency (moved before getUpdatedPortfolio uses it)
+      const getUnderlyingCurrencyForItem = (item) => {
+        const nameLower = (item.name || '').toLowerCase();
+        if (nameLower.includes('s&p 500') || nameLower.includes('s&p500')) return 'USD';
+        if (item.isin?.startsWith('US')) return 'USD';
+        if (nameLower.includes('ultrashort') && nameLower.includes('usd')) return 'USD';
+        if (nameLower.includes('developed world')) return 'MIXED_60USD';
+        if (nameLower.includes('emerging')) return 'MIXED_30USD';
+        return item.currency || 'EUR';
       };
 
       const updatedPortfolio = getUpdatedPortfolio();
       
       // Calculate totals - including UNDERLYING currency exposure
       // Some EUR-denominated funds (like Vanguard S&P 500) hold USD assets
-      const getUnderlyingCurrency = (item) => {
-        const nameLower = item.name.toLowerCase();
-        // S&P 500 funds hold US stocks regardless of fund currency
-        if (nameLower.includes('s&p 500') || nameLower.includes('s&p500')) return 'USD';
-        // US individual stocks
-        if (item.isin?.startsWith('US')) return 'USD';
-        // iShares USD Ultrashort Bond
-        if (nameLower.includes('ultrashort') && nameLower.includes('usd')) return 'USD';
-        // Developed World has mixed exposure (~60% USD typically)
-        if (nameLower.includes('developed world')) return 'MIXED_60USD';
-        // Emerging markets - mixed but less USD
-        if (nameLower.includes('emerging')) return 'MIXED_30USD';
-        // Default to trading currency
-        return item.currency;
-      };
+      // (getUnderlyingCurrencyForItem is defined above)
       
       const totals = (() => {
         const totalValue = updatedPortfolio.reduce((sum, item) => sum + (item.liveValue || item.mktVal), 0);
@@ -1104,7 +1100,7 @@ return {
         
         updatedPortfolio.forEach(item => {
           const value = item.liveValue || item.mktVal;
-          const underlying = getUnderlyingCurrency(item);
+          const underlying = getUnderlyingCurrencyForItem(item);
           
           if (underlying === 'USD') {
             trueUsdExposure += value;
