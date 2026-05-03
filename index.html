@@ -139,7 +139,7 @@
           pot = row['Pot'] || '';
           name = row['Instrument Name'] || '';
           isin = row['ISIN'] || '';
-          mktVal = parseFloat((row['Mkt Val'] || row['Pos Mkt Val'] || '0').toString().replace(/,/g, '')) || 0;
+          mktVal = parseFloat((row['Mkt Val'] || '0').toString().replace(/,/g, '')) || 0;
           quantity = parseFloat((row['Quantity'] || '0').toString().replace(/,/g, '')) || 0;
           currency = row['Pos Cur'] || 'EUR';
           unrealizedPLPct = parseFloat((row['Unr P&L %'] || '0').toString().replace(/,/g, '')) || 0;
