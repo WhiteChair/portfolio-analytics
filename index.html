@@ -1045,15 +1045,10 @@ return {
         );
       }
 
-  const getUpdatedPortfolio = () => {
-  const scenarioFxRate = fxRate * (1 + fxScenario / 100);
-  
-  return portfolioData.map(item => {
-    // CSV values are already in EUR, use them as-is
-    return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
-  });
-};
-          
+      const getUpdatedPortfolio = () => {
+        const scenarioFxRate = fxRate * (1 + fxScenario / 100);
+        
+        return portfolioData.map(item => {
           const live = liveData?.[item.isin];
           if (live && item.quantity) {
             let valueEur = live.price * item.quantity;
