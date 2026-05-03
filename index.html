@@ -943,6 +943,13 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
             }
             
             setPortfolioData(transformed);
+            // Extract actual EUR/USD rate from CSV (look for X Rate column in USD positions)
+        const csvFxRate = (() => {
+        const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' || row['X Rate']);
+        const rate = parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, ''));
+        return isNaN(rate) ? 1.17 : rate;
+      })();
+      setFxRate(csvFxRate);
             setDataDate(new Date().toLocaleDateString('en-GB', { 
               day: 'numeric', month: 'short', year: 'numeric' 
             }));
