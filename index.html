@@ -915,18 +915,19 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
             console.error('❌ Free APIs also failed:', freeErr);
           }
           
-          // Last resort: hardcoded fallback
-         setLoadingStatus('Using CSV data (APIs unavailable)...');
+         // Last resort: use CSV data as-is
+const csvFxRate = (() => {
+  const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
+  return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
+})();
+
+setLoadingStatus('Using CSV data (APIs unavailable)...');
 setUsingFallback(true);
 return {
   securities: {}, // Empty = will use CSV mktVal
   eurUsd: csvFxRate || fxRate,
   benchmark: benchmarkData || generateBenchmarkData()
 };
-          const csvFxRate = (() => {
-  const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
-  return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
-})();
           
 
       const handleFile = useCallback(async (file) => {
