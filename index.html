@@ -139,7 +139,7 @@
           pot = row['Pot'] || '';
           name = row['Instrument Name'] || '';
           isin = row['ISIN'] || '';
-          mktVal = parseFloat((row['Mkt Val'] || '0').toString().replace(/,/g, '')) || 0;
+          mktVal = parseFloat((row['Mkt Val'] || row['Pos Mkt Val'] || '0').toString().replace(/,/g, '')) || 0;
           quantity = parseFloat((row['Quantity'] || '0').toString().replace(/,/g, '')) || 0;
           currency = row['Pos Cur'] || 'EUR';
           unrealizedPLPct = parseFloat((row['Unr P&L %'] || '0').toString().replace(/,/g, '')) || 0;
@@ -202,41 +202,23 @@
       }).filter(row => row !== null);
     };
     
-    // Match ISIN by product name for CSVs without ISIN column
-    // This is a generic mapping of common securities - not personal data
+    // Match ISIN by product name for new format CSVs
     const matchIsinByName = (name) => {
       const nameLower = name.toLowerCase();
       
-      // Common securities name patterns to ISIN mapping
       const nameToIsin = {
-        // Common ETF patterns
         'ultrashort bond': 'IE00BCRY6227',
-        's&p 500': 'IE00B3XXRP09',
+        'ishares': 'IE00BCRY6227',
+        'alphabet': 'US02079K1079',
+        'berkshire': 'US0846707026',
+        'blackrock': 'US09290D1019',
+        'sofina': 'BE0003717312',
         'developed world': 'IE00BKX55T58',
         'ftse developed': 'IE00BKX55T58',
         'emerging market': 'IE00B3VVMM84',
         'ftse emerging': 'IE00B3VVMM84',
-        'msci world': 'IE00B4L5Y983',
-        'stoxx 600': 'LU0378449770',
-        
-        // Common US stocks patterns
-        'alphabet': 'US02079K1079',
-        'google': 'US02079K1079',
-        'berkshire': 'US0846707026',
-        'blackrock': 'US09290D1019',
-        'apple': 'US0378331005',
-        'microsoft': 'US5949181045',
-        'amazon': 'US0231351067',
-        'tesla': 'US88160R1014',
-        'meta': 'US30303M1027',
-        'facebook': 'US30303M1027',
-        'nvidia': 'US67066G1040',
-        
-        // Common EU stocks patterns
-        'asml': 'NL0010273215',
-        'total': 'FR0000120271',
-        'sap': 'DE0007164600',
-        'sofina': 'BE0003717312',
+        's&p 500': 'IE00B3XXRP09',
+        'vanguard s&p': 'IE00B3XXRP09',
       };
       
       for (const [key, isin] of Object.entries(nameToIsin)) {
@@ -248,91 +230,84 @@
       return '';
     };
 
-    // Ticker mapping - built dynamically from common securities
-    // This maps ISINs to Yahoo Finance tickers for price lookups
-    // Users can add their own mappings or the tool will use fallback data
-    const isinToTickerMap = {
-      // Common US stocks
-      'US02079K1079': 'GOOG',      // Alphabet Class C
-      'US02079K3059': 'GOOGL',     // Alphabet Class A
-      'US0846707026': 'BRK-B',     // Berkshire Hathaway B
-      'US0846701086': 'BRK-A',     // Berkshire Hathaway A
-      'US09290D1019': 'BLK',       // BlackRock
-      'US0378331005': 'AAPL',      // Apple
-      'US5949181045': 'MSFT',      // Microsoft
-      'US0231351067': 'AMZN',      // Amazon
-      'US88160R1014': 'TSLA',      // Tesla
-      'US30303M1027': 'META',      // Meta
-      'US67066G1040': 'NVDA',      // NVIDIA
-      
-      // Common EU stocks
-      'BE0003717312': 'SOF.BR',    // Sofina
-      'NL0010273215': 'ASML.AS',   // ASML
-      'FR0000120271': 'TTE.PA',    // TotalEnergies
-      'DE0007164600': 'SAP.DE',    // SAP
-      
-      // Common ETFs
-      'IE00BCRY6227': 'NEAR',      // iShares Ultrashort Bond
-      'IE00BKX55T58': 'VDEV.L',    // Vanguard FTSE Developed World
-      'IE00B3VVMM84': 'VFEM.L',    // Vanguard FTSE Emerging Markets
-      'IE00B3XXRP09': 'VUAA.L',    // Vanguard S&P 500
-      'IE00B4L5Y983': 'IWDA.L',    // iShares Core MSCI World
-      'IE00B5BMR087': 'CSPX.L',    // iShares Core S&P 500
-      'LU0378449770': 'EXSA.DE',   // iShares STOXX Europe 600
+    // Ticker mapping for known securities
+    const tickerMap = {
+      'IE00BCRY6227': { ticker: 'NEAR', name: 'iShares Ultrashort Bond', dividend: 4.8 },
+      'US02079K1079': { ticker: 'GOOG', name: 'Alphabet', dividend: 0.0 },
+      'US0846707026': { ticker: 'BRK.B', name: 'Berkshire Hathaway', dividend: 0.0 },
+      'US09290D1019': { ticker: 'BLK', name: 'BlackRock', dividend: 2.3 },
+      'BE0003717312': { ticker: 'SOF.BR', name: 'Sofina', dividend: 1.1 },
+      'IE00BKX55T58': { ticker: 'VDEV.AS', name: 'Vanguard FTSE Developed World', dividend: 1.8 },
+      'IE00B3VVMM84': { ticker: 'VFEM.AS', name: 'Vanguard FTSE Emerging Markets', dividend: 2.9 },
+      'IE00B3XXRP09': { ticker: 'VUSA.AS', name: 'Vanguard S&P 500', dividend: 1.3 },
     };
-    
-    // Common dividend yields (approximate, used as fallback)
-    const commonDividends = {
-      'GOOG': 0.5, 'GOOGL': 0.5, 'BRK-B': 0.0, 'BRK-A': 0.0, 'BLK': 2.1,
-      'AAPL': 0.5, 'MSFT': 0.7, 'AMZN': 0.0, 'TSLA': 0.0, 'META': 0.0, 'NVDA': 0.0,
-      'SOF.BR': 1.0, 'ASML.AS': 0.7, 'TTE.PA': 5.0, 'SAP.DE': 1.5,
-      'NEAR': 5.0, 'VDEV.L': 1.7, 'VFEM.L': 3.0, 'VUAA.L': 1.2,
-      'IWDA.L': 1.5, 'CSPX.L': 1.3, 'EXSA.DE': 2.5,
-    };
-    
-    // For backward compatibility - maps to the new structure
-    const tickerMap = {};
-    Object.entries(isinToTickerMap).forEach(([isin, ticker]) => {
-      tickerMap[isin] = { 
-        ticker, 
-        name: ticker, 
-        dividend: commonDividends[ticker] || 1.5 
-      };
-    });
 
-    // Generate fallback data if all APIs fail
-    // Creates generic estimates based on security type - no personal data exposed
+    // Generate fallback data if API fails - LAST RESORT ONLY
+    // These values will be outdated - the tool should fetch live data
     const generateFallbackData = (isins) => {
-      console.warn('⚠️ Using estimated fallback data - all API calls failed');
+      console.warn('⚠️ Using hardcoded fallback data - all API calls failed. Data may be outdated!');
       const securities = {};
       
+      // Updated Jan 2026 estimates - but LIVE DATA IS PREFERRED
+      const fallbackPrices = {
+        'IE00BCRY6227': { price: 100.05, currency: 'USD', dividendYield: 5.1, high52w: 101.0, low52w: 99.0 },
+        'US02079K1079': { price: 333.00, currency: 'USD', dividendYield: 0.5, high52w: 350.0, low52w: 140.0 },
+        'US0846707026': { price: 492.00, currency: 'USD', dividendYield: 0.0, high52w: 500.0, low52w: 380.0 },
+        'US09290D1019': { price: 1156.00, currency: 'USD', dividendYield: 2.1, high52w: 1200.0, low52w: 800.0 },
+        'BE0003717312': { price: 265.00, currency: 'EUR', dividendYield: 1.0, high52w: 295.0, low52w: 220.0 },
+        'IE00BKX55T58': { price: 112.87, currency: 'EUR', dividendYield: 1.7, high52w: 115.0, low52w: 90.0 },
+        'IE00B3VVMM84': { price: 67.38, currency: 'EUR', dividendYield: 3.0, high52w: 70.0, low52w: 54.0 },
+        'IE00B3XXRP09': { price: 113.55, currency: 'EUR', dividendYield: 1.2, high52w: 118.0, low52w: 92.0 },
+      };
+      
       isins.forEach(isin => {
-        // Determine likely currency and price range from ISIN country code
-        const countryCode = isin.substring(0, 2);
-        const isUS = countryCode === 'US';
-        const isIE = countryCode === 'IE'; // Irish-domiciled ETFs
-        const isLU = countryCode === 'LU'; // Luxembourg funds
-        
-        // Generic fallback - will be replaced by live data when APIs work
-        securities[isin] = { 
-          price: 100,  // Generic placeholder
-          currency: isUS ? 'USD' : 'EUR',
-          dividendYield: 1.5,
-          high52w: 110,
-          low52w: 90
+        securities[isin] = fallbackPrices[isin] || { 
+          price: 100, currency: 'EUR', dividendYield: 1.5, high52w: 110, low52w: 90 
         };
       });
       
-      const benchmark = generateBenchmarkData();
+      const benchmark = [];
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      for (let year = 23; year <= 25; year++) {
+        const monthsToInclude = year === 25 ? 12 : 12;
+        for (let m = 0; m < monthsToInclude; m++) {
+          let baseReturn = (Math.random() - 0.45) * 4;
+          if (year === 23) baseReturn += 0.5;
+          if (year === 24) baseReturn += 0.4;
+          if (year === 25) baseReturn += 0.2;
+          benchmark.push({
+            month: `${months[m]} ${year}`,
+            return: parseFloat(baseReturn.toFixed(2))
+          });
+        }
+      }
       
-      return { securities, eurUsd: 1.10, benchmark };
+      return { securities, eurUsd: 1.16, benchmark };
     };
     
-    // ISIN to Yahoo Finance ticker mapping - reference to main map
-    const isinToTicker = isinToTickerMap;
+    // ISIN to Yahoo Finance ticker mapping
+    const isinToTicker = {
+      'IE00BCRY6227': 'NEAR',       // iShares Ultrashort Bond
+      'US02079K1079': 'GOOG',       // Alphabet Class C
+      'US0846707026': 'BRK-B',      // Berkshire Hathaway CLASS B (not A!)
+      'US09290D1019': 'BLK',        // BlackRock
+      'BE0003717312': 'SOF.BR',     // Sofina (Brussels)
+      'IE00BKX55T58': 'VDEV.L',     // Vanguard FTSE Developed World (London)
+      'IE00B3VVMM84': 'VFEM.L',     // Vanguard FTSE Emerging Markets (London)
+      'IE00B3XXRP09': 'VUAA.L',     // Vanguard S&P 500 UCITS ETF (London, USD denominated)
+    };
     
-    // Dividend yields lookup by ticker
-    const knownDividends = commonDividends;
+    // Dividend yields (these don't change frequently)
+    const knownDividends = {
+      'IE00BCRY6227': 5.1,
+      'US02079K1079': 0.5,
+      'US0846707026': 0.0,
+      'US09290D1019': 2.1,
+      'BE0003717312': 1.0,
+      'IE00BKX55T58': 1.7,
+      'IE00B3VVMM84': 3.0,
+      'IE00B3XXRP09': 1.2,
+    };
     
     // Fetch EUR/USD rate from free Frankfurter API
     const fetchEurUsdRate = async () => {
@@ -400,7 +375,7 @@
               data: {
                 price: yahooData.price,
                 currency: yahooData.currency || 'USD',
-                dividendYield: knownDividends[ticker] || 1.5,
+                dividendYield: knownDividends[isin] || 1.5,
                 high52w: yahooData.high52w || yahooData.price * 1.1,
                 low52w: yahooData.low52w || yahooData.price * 0.9,
               }
@@ -782,7 +757,7 @@
       const [usingFallback, setUsingFallback] = useState(false);
 
       // Fetch live data via Claude API or free APIs
-      const fetchLiveData = async (holdings, rawData) => {
+      const fetchLiveData = async (holdings) => {
         const isins = holdings
           .filter(h => h.isin && h.type !== 'Cash')
           .map(h => h.isin);
@@ -915,20 +890,12 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
             console.error('❌ Free APIs also failed:', freeErr);
           }
           
-         // Last resort: use CSV data as-is
-const csvFxRate = (() => {
-  const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
-  return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
-})();
-
-setLoadingStatus('Using CSV data (APIs unavailable)...');
-setUsingFallback(true);
-return {
-  securities: {}, // Empty = will use CSV mktVal
-  eurUsd: csvFxRate || fxRate,
-  benchmark: benchmarkData || generateBenchmarkData()
-};
-          
+          // Last resort: hardcoded fallback
+          setLoadingStatus('Using cached data (all APIs unavailable)...');
+          setUsingFallback(true);
+          return generateFallbackData(uniqueIsins);
+        }
+      };
 
       const handleFile = useCallback(async (file) => {
         if (!file) return;
@@ -951,19 +918,12 @@ return {
             }
             
             setPortfolioData(transformed);
-            // Extract actual EUR/USD rate from CSV (look for X Rate column in USD positions)
-        const csvFxRate = (() => {
-        const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' || row['X Rate']);
-        const rate = parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, ''));
-        return isNaN(rate) ? 1.17 : rate;
-      })();
-      setFxRate(csvFxRate);
             setDataDate(new Date().toLocaleDateString('en-GB', { 
               day: 'numeric', month: 'short', year: 'numeric' 
             }));
             
             setLoadingStatus('Fetching live market data...');
-            const live = await fetchLiveData(transformed, rawData);
+            const live = await fetchLiveData(transformed);
             setLiveData(live.securities);
             setBenchmarkData(live.benchmark);
             setFxRate(live.eurUsd);
@@ -1045,10 +1005,18 @@ return {
         );
       }
 
+      // Calculate updated portfolio with live prices
       const getUpdatedPortfolio = () => {
         const scenarioFxRate = fxRate * (1 + fxScenario / 100);
         
         return portfolioData.map(item => {
+          if (item.type === 'Cash') {
+            if (item.currency === 'USD') {
+              return { ...item, liveValue: item.mktVal / scenarioFxRate, liveCurrency: 'EUR' };
+            }
+            return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
+          }
+          
           const live = liveData?.[item.isin];
           if (live && item.quantity) {
             let valueEur = live.price * item.quantity;
