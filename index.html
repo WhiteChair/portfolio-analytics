@@ -1037,17 +1037,37 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
         );
       }
 
-      // Calculate updated portfolio with live prices
-      const getUpdatedPortfolio = () => {
-        const scenarioFxRate = fxRate * (1 + fxScenario / 100);
-        
-        return portfolioData.map(item => {
-          if (item.type === 'Cash') {
-            if (item.currency === 'USD') {
-              return { ...item, liveValue: item.mktVal / scenarioFxRate, liveCurrency: 'EUR' };
-            }
-            return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
-          }
+     const getUpdatedPortfolio = () => {
+  const scenarioFxRate = fxRate * (1 + fxScenario / 100);
+  
+  return portfolioData.map(item => {
+    // For Cash: just use CSV value (already EUR)
+    if (item.type === 'Cash') {
+      return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
+    }
+    
+    // For non-Cash items: check for live data
+    const live = liveData?.[item.isin];
+    if (live && item.quantity) {
+      let valueEur = live.price * item.quantity;
+      if (live.currency === 'USD') {
+        valueEur = valueEur / scenarioFxRate;
+      }
+      return {
+        ...item,
+        livePrice: live.price,
+        liveCurrency: live.currency,
+        liveValue: valueEur,
+        dividendYield: live.dividendYield,
+        high52w: live.high52w,
+        low52w: live.low52w,
+      };
+    }
+    
+    // No live data: use CSV value (already EUR)
+    return { ...item, liveValue: item.mktVal, liveCurrency: 'EUR' };
+  });
+};
           
           const live = liveData?.[item.isin];
           if (live && item.quantity) {
