@@ -782,7 +782,7 @@
       const [usingFallback, setUsingFallback] = useState(false);
 
       // Fetch live data via Claude API or free APIs
-      const fetchLiveData = async (holdings) => {
+      const fetchLiveData = async (holdings, rawData) => {
         const isins = holdings
           .filter(h => h.isin && h.type !== 'Cash')
           .map(h => h.isin);
@@ -963,7 +963,7 @@ return {
             }));
             
             setLoadingStatus('Fetching live market data...');
-            const live = await fetchLiveData(transformed);
+            const live = await fetchLiveData(transformed, rawData);
             setLiveData(live.securities);
             setBenchmarkData(live.benchmark);
             setFxRate(live.eurUsd);
