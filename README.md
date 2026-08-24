@@ -69,7 +69,7 @@ If you choose to use the Claude API, your key is stored in `localStorage` which 
 
 ## 📁 Supported CSV Formats
 
-Works with many common EU / neo-broker exports. The parser auto-detects delimiter (`,` / `;`), European vs US number formats, and falls back gracefully when columns are missing. ISIN is enriched from a built-in name map when absent.
+Works with many common EU / neo-broker exports. The parser auto-detects delimiter (`,` / `;`), European vs US number formats (`1.234,56` and `1,234.56`), normalizes headers, and falls back gracefully when columns are missing. Missing ISINs are enriched from a built-in name map.
 
 | Format | Typical columns / signals |
 |--------|---------------------------|
