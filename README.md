@@ -69,12 +69,16 @@ If you choose to use the Claude API, your key is stored in `localStorage` which 
 
 ## 📁 Supported CSV Formats
 
-Works with Deutsche Bank exports (and similar EU bank formats):
+Works with many common EU / neo-broker exports. The parser auto-detects delimiter (`,` / `;`), European vs US number formats, and falls back gracefully when columns are missing. ISIN is enriched from a built-in name map when absent.
 
-| Format | Columns Used |
-|--------|--------------|
-| Raw Export | Pot, Assets, Instrument Name, ISIN, Mkt Val, Quantity, Pos Cur |
-| Simplified | Category, Product Name, Value (EUR), Currency |
+| Format | Typical columns / signals |
+|--------|---------------------------|
+| **Deutsche Bank (raw)** | Pot, Assets, Instrument Name, ISIN, Mkt Val, Quantity, Pos Cur |
+| **Deutsche Bank (simplified)** | Category, Product Name, Value (EUR), Currency, Quantity |
+| **Interactive Brokers** | Symbol / ISIN, Quantity, Position Value, Currency, Asset Class (Open Positions / Flex) |
+| **DEGIRO-style** | Product, ISIN, Quantity / Shares, Value |
+| **Trade Republic / Scalable Capital style** | Name / Product, (ISIN), Quantity, Current Value / Value, Performance % |
+| **Generic** | Any combination of Name/Product + (ISIN or Symbol) + Quantity + Value/Market Value + optional Currency |
 
 ---
 
@@ -98,7 +102,7 @@ No build process needed. Just:
 
 ```bash
 # Clone the repo
-git clone https://github.com/yourusername/portfolio-analytics.git
+git clone https://github.com/WhiteChair/portfolio-analytics.git
 
 # Open in browser
 open index.html
