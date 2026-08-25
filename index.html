@@ -63,42 +63,103 @@
     const { useState, useCallback, useEffect, useMemo } = React;
     const { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid, Legend, LineChart, Line } = window.Recharts;
 
-    // CSV Parser - handles BOM and quoted values
-    const parseCSV = (text) => {
-      // Remove BOM if present
-      if (text.charCodeAt(0) === 0xFEFF) {
-        text = text.slice(1);
+    // ──────────────────────────────────────────────────────────────
+    // Expanded CSV support (Deutsche Bank + IBKR + DEGIRO + TR/Scalable + generic)
+    // ──────────────────────────────────────────────────────────────
+
+    // Parse a number that may use European (1.234,56) or US (1,234.56) formatting
+    const parseNumber = (val) => {
+      if (val === null || val === undefined || val === '') return 0;
+      let s = String(val).trim().replace(/[€$£%\s]/g, '');
+      if (!s || s === '-' || s === '—') return 0;
+
+      // European: 1.234,56 or 1234,56
+      if (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^\d+,\d+$/.test(s)) {
+        s = s.replace(/\./g, '').replace(',', '.');
+      } else {
+        // US / plain: remove thousands commas
+        s = s.replace(/,/g, '');
       }
-      
-      const lines = text.trim().split('\n');
-      const headers = parseCSVLine(lines[0]);
-      
+      const n = parseFloat(s);
+      return isNaN(n) ? 0 : n;
+    };
+
+    // Normalize header for fuzzy matching
+    const normalizeHeader = (h) =>
+      String(h || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_\-./()]+/g, ' ')
+        .replace(/[^\w\s%]/g, '')
+        .trim();
+
+    // Find first matching column from a list of possible normalized names
+    const findCol = (row, candidates) => {
+      const keys = Object.keys(row);
+      for (const cand of candidates) {
+        const normCand = normalizeHeader(cand);
+        for (const k of keys) {
+          if (normalizeHeader(k) === normCand || normalizeHeader(k).includes(normCand)) {
+            return row[k];
+          }
+        }
+      }
+      // Partial / contains fallback
+      for (const cand of candidates) {
+        const normCand = normalizeHeader(cand);
+        for (const k of keys) {
+          if (normalizeHeader(k).includes(normCand) || normCand.includes(normalizeHeader(k))) {
+            return row[k];
+          }
+        }
+      }
+      return undefined;
+    };
+
+    // Detect delimiter (comma vs semicolon) from the first line
+    const detectDelimiter = (text) => {
+      const firstLine = text.split(/\r?\n/)[0] || '';
+      const commas = (firstLine.match(/,/g) || []).length;
+      const semis  = (firstLine.match(/;/g) || []).length;
+      return semis > commas ? ';' : ',';
+    };
+
+    // CSV Parser - BOM, quotes, auto delimiter
+    const parseCSV = (text) => {
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      text = text.trim();
+      if (!text) return [];
+
+      const delim = detectDelimiter(text);
+      const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+      if (lines.length < 2) return [];
+
+      const headers = parseCSVLine(lines[0], delim);
       return lines.slice(1).map(line => {
-        const values = parseCSVLine(line);
+        const values = parseCSVLine(line, delim);
         const row = {};
         headers.forEach((header, i) => {
-          row[header] = values[i] || '';
+          row[header] = values[i] !== undefined ? values[i] : '';
         });
         return row;
       });
     };
-    
-    // Parse a single CSV line handling quotes properly
-    const parseCSVLine = (line) => {
+
+    const parseCSVLine = (line, delim = ',') => {
       const values = [];
       let current = '';
       let inQuotes = false;
-      
+
       for (let i = 0; i < line.length; i++) {
         const char = line[i];
         if (char === '"') {
           if (inQuotes && line[i + 1] === '"') {
             current += '"';
-            i++; // Skip escaped quote
+            i++;
           } else {
             inQuotes = !inQuotes;
           }
-        } else if (char === ',' && !inQuotes) {
+        } else if (char === delim && !inQuotes) {
           values.push(current.trim());
           current = '';
         } else {
@@ -109,117 +170,200 @@
       return values;
     };
 
-    // Transform bank data - handles multiple CSV formats
+    // ── Main transform ────────────────────────────────────────────
     const transformBankData = (rawData) => {
+      if (!rawData || rawData.length === 0) return [];
+
+      // Detect overall flavour once (first non-empty row)
+      const sample = rawData.find(r => Object.keys(r).length > 2) || rawData[0] || {};
+      const headers = Object.keys(sample).map(normalizeHeader).join(' | ');
+
+      let detected = 'generic';
+      if (headers.includes('instrument name') || headers.includes('mkt val') || headers.includes('ptf wgt') || headers.includes('pos cur')) {
+        detected = 'deutsche-bank';
+      } else if (headers.includes('product name') || (headers.includes('category') && headers.includes('value (eur)'))) {
+        detected = 'deutsche-bank-simple';
+      } else if (headers.includes('position value') || headers.includes('asset class') || (headers.includes('symbol') && headers.includes('quantity'))) {
+        detected = 'ibkr';
+      } else if (headers.includes('product') && headers.includes('isin') && (headers.includes('quantity') || headers.includes('shares'))) {
+        detected = 'degiro';
+      } else if (headers.includes('performance') || headers.includes('since buy') || headers.includes('current value')) {
+        detected = 'neobroker'; // Trade Republic / Scalable style
+      }
+
+      console.log(`📂 CSV format detected: ${detected}`);
+
       return rawData.map(row => {
-        // Detect format based on available columns
-        // Format 1 (raw DB): Pot, Assets, Instrument Name, ISIN, Mkt Val, Quantity, Ptf Wgt %, Unr P&L %, Pos Cur
-        // Format 2 (old): Pot, Instrument Name, ISIN, Mkt Val, Quantity, Portfolio weight %, Unr P&L %, Pos Cur
-        // Format 3 (new): Category, Product Name, Quantity, Price, Currency, Value (EUR), Yield/Performance Since Purchase
-        
-        const isNewFormat = row['Category'] !== undefined || row['Product Name'] !== undefined;
-        const isRawDBFormat = row['Assets'] !== undefined || row['Ptf Wgt %'] !== undefined;
-        
-        let pot, name, isin, mktVal, quantity, currency, unrealizedPLPct, price, assets;
-        
-        if (isNewFormat) {
-          // New format (Jan 2026 simplified)
-          pot = row['Category'] || '';
-          name = row['Product Name'] || '';
-          isin = '';
-          mktVal = parseFloat((row['Value (EUR)'] || '0').toString().replace(/,/g, '')) || 0;
-          quantity = parseFloat((row['Quantity'] || '0').toString().replace(/,/g, '')) || 0;
-          currency = row['Currency'] || 'EUR';
-          price = parseFloat((row['Price'] || '0').toString().replace(/,/g, '')) || 0;
-          const perfStr = row['Yield/Performance Since Purchase'] || '0%';
-          unrealizedPLPct = parseFloat(perfStr.replace('%', '').replace('+', '')) || 0;
-          assets = '';
-        } else {
-          // Raw DB format or old format
-          pot = row['Pot'] || '';
-          name = row['Instrument Name'] || '';
-          isin = row['ISIN'] || '';
-          mktVal = parseFloat((row['Mkt Val'] || '0').toString().replace(/,/g, '')) || 0;
-          quantity = parseFloat((row['Quantity'] || '0').toString().replace(/,/g, '')) || 0;
-          currency = row['Pos Cur'] || 'EUR';
-          unrealizedPLPct = parseFloat((row['Unr P&L %'] || '0').toString().replace(/,/g, '')) || 0;
-          price = parseFloat((row['Price'] || '0').toString().replace(/,/g, '')) || 0;
-          assets = row['Assets'] || ''; // Raw DB format has this column
+        // Skip obvious summary / total rows
+        const nameProbe = String(findCol(row, ['Instrument Name', 'Product Name', 'Product', 'Name', 'Security Name', 'Description', 'Symbol', 'Bezeichnung']) || '').toLowerCase();
+        if (!nameProbe || nameProbe === 'total' || nameProbe === 'sum' || nameProbe.includes('gesamt') || nameProbe === 'cash balance') {
+          // still allow pure cash lines later
         }
-        
-        // Skip empty rows
-        if (!name || name === 'Unknown' || mktVal === 0) return null;
-        
-        // Determine type based on category/pot/assets and name
+
+        let pot = '', name = '', isin = '', mktVal = 0, quantity = 0, currency = 'EUR';
+        let unrealizedPLPct = 0, price = 0, assets = '', symbol = '';
+
+        // ── Deutsche Bank classic ──
+        if (detected === 'deutsche-bank' || findCol(row, ['Instrument Name', 'Mkt Val', 'Pos Cur'])) {
+          pot        = findCol(row, ['Pot', 'Category']) || '';
+          name       = findCol(row, ['Instrument Name', 'Product Name', 'Name']) || '';
+          isin       = findCol(row, ['ISIN']) || '';
+          mktVal     = parseNumber(findCol(row, ['Mkt Val', 'Market Value', 'Value (EUR)', 'Value']));
+          quantity   = parseNumber(findCol(row, ['Quantity', 'Qty', 'Shares', 'Stück']));
+          currency   = findCol(row, ['Pos Cur', 'Currency', 'Curr']) || 'EUR';
+          unrealizedPLPct = parseNumber(findCol(row, ['Unr P&L %', 'Unrealized P&L %', 'Performance']));
+          price      = parseNumber(findCol(row, ['Price', 'Kurs']));
+          assets     = findCol(row, ['Assets']) || '';
+        }
+        // ── Deutsche Bank simplified ──
+        else if (detected === 'deutsche-bank-simple' || findCol(row, ['Product Name', 'Value (EUR)'])) {
+          pot        = findCol(row, ['Category', 'Pot']) || '';
+          name       = findCol(row, ['Product Name', 'Name', 'Product']) || '';
+          isin       = findCol(row, ['ISIN']) || '';
+          mktVal     = parseNumber(findCol(row, ['Value (EUR)', 'Value', 'Market Value']));
+          quantity   = parseNumber(findCol(row, ['Quantity', 'Qty']));
+          currency   = findCol(row, ['Currency', 'Curr']) || 'EUR';
+          price      = parseNumber(findCol(row, ['Price']));
+          const perf = findCol(row, ['Yield/Performance Since Purchase', 'Performance', 'Since Buy']);
+          if (perf) unrealizedPLPct = parseNumber(String(perf).replace('%', ''));
+        }
+        // ── IBKR Open Positions / Flex ──
+        else if (detected === 'ibkr' || findCol(row, ['Position Value', 'Asset Class', 'Asset Category'])) {
+          name       = findCol(row, ['Description', 'Name', 'Symbol', 'Underlying Symbol']) || '';
+          symbol     = findCol(row, ['Symbol']) || '';
+          isin       = findCol(row, ['ISIN', 'Security ID']) || '';
+          mktVal     = parseNumber(findCol(row, ['Position Value', 'Market Value', 'Value', 'PositionValue']));
+          quantity   = parseNumber(findCol(row, ['Quantity', 'Qty', 'Position']));
+          currency   = findCol(row, ['Currency', 'Curr']) || 'USD';
+          pot        = findCol(row, ['Asset Class', 'Asset Category', 'AssetCategory']) || '';
+          price      = parseNumber(findCol(row, ['Mark Price', 'Price', 'Close Price']));
+          if (!name && symbol) name = symbol;
+        }
+        // ── DEGIRO style ──
+        else if (detected === 'degiro' || (findCol(row, ['Product']) && findCol(row, ['ISIN']))) {
+          name       = findCol(row, ['Product', 'Name', 'Description']) || '';
+          isin       = findCol(row, ['ISIN']) || '';
+          mktVal     = parseNumber(findCol(row, ['Value', 'Local Value', 'Market Value', 'Value in EUR']));
+          quantity   = parseNumber(findCol(row, ['Quantity', 'Shares', 'Stück', 'Aantal']));
+          currency   = findCol(row, ['Currency', 'Local Currency']) || 'EUR';
+          price      = parseNumber(findCol(row, ['Close', 'Price', 'Kurs']));
+          pot        = findCol(row, ['Product Type', 'Type']) || '';
+        }
+        // ── Neo-broker / generic ──
+        else {
+          name       = findCol(row, ['Name', 'Product Name', 'Product', 'Instrument Name', 'Security Name', 'Description', 'Symbol', 'Bezeichnung', 'Titel']) || '';
+          isin       = findCol(row, ['ISIN', 'Isin']) || '';
+          symbol     = findCol(row, ['Symbol', 'Ticker', 'Ticker Symbol']) || '';
+          mktVal     = parseNumber(findCol(row, [
+            'Value (EUR)', 'Market Value', 'Position Value', 'Current Value', 'Value', 'Mkt Val',
+            'Wert', 'Aktueller Wert', 'Gesamtwert', 'MarketValue'
+          ]));
+          quantity   = parseNumber(findCol(row, ['Quantity', 'Qty', 'Shares', 'Stück', 'Anzahl', 'Position', 'Units']));
+          currency   = findCol(row, ['Currency', 'Curr', 'Pos Cur', 'Währung']) || 'EUR';
+          price      = parseNumber(findCol(row, ['Price', 'Kurs', 'Mark Price', 'Close']));
+          pot        = findCol(row, ['Category', 'Pot', 'Type', 'Asset Class', 'Asset Category']) || '';
+          const perf = findCol(row, ['Performance', 'Since Buy', 'Unr P&L %', 'Yield/Performance Since Purchase', 'Return']);
+          if (perf) unrealizedPLPct = parseNumber(String(perf).replace('%', ''));
+          if (!name && symbol) name = symbol;
+        }
+
+        // Skip empty / zero-value non-cash rows
+        if ((!name || name.toLowerCase() === 'unknown') && mktVal === 0) return null;
+        if (mktVal === 0 && quantity === 0 && !name.toLowerCase().includes('cash') && !pot.toLowerCase().includes('cash')) {
+          return null;
+        }
+
+        // ── Type classification ──
         let type = 'Other';
-        const nameLower = name.toLowerCase();
-        const potLower = pot.toLowerCase();
-        const assetsLower = assets.toLowerCase();
-        
-        // Check for cash - multiple ways to identify
-        if (potLower === 'cash' || potLower === 'liquiditeiten' || potLower.includes('cash')) {
+        const nameLower = (name || '').toLowerCase();
+        const potLower  = (pot || '').toLowerCase();
+        const assetsLower = (assets || '').toLowerCase();
+
+        if (
+          potLower.includes('cash') || potLower === 'liquiditeiten' || potLower.includes('geld') ||
+          assetsLower === 'eur' || assetsLower === 'usd' ||
+          nameLower.includes('cash') || nameLower.includes('money market') || nameLower === 'eur' || nameLower === 'usd'
+        ) {
           type = 'Cash';
-        } else if (assetsLower === 'eur' || assetsLower === 'usd') {
-          type = 'Cash';
-        }
-        // Check for bonds
-        else if (assetsLower === 'obligaties' || nameLower.includes('bond') || nameLower.includes('ultrashort')) {
+        } else if (
+          potLower.includes('bond') || potLower.includes('obligatie') || potLower.includes('fixed') ||
+          nameLower.includes('bond') || nameLower.includes('ultrashort') || nameLower.includes('treasury') ||
+          nameLower.includes('aggregate') || nameLower.includes('corporate bond')
+        ) {
           type = 'Bond ETF';
-        }
-        // Check for funds/ETFs
-        else if (potLower === 'funds' || nameLower.includes('etf') || nameLower.includes('vanguard') || nameLower.includes('ishares') || nameLower.includes('ftse') || nameLower.includes('s&p')) {
+        } else if (
+          nameLower.includes('etf') || nameLower.includes('ucits') ||
+          nameLower.includes('vanguard') || nameLower.includes('ishares') || nameLower.includes('amundi') ||
+          nameLower.includes('xtrackers') || nameLower.includes('lyxor') || nameLower.includes('spdr') ||
+          nameLower.includes('ftse') || nameLower.includes('msci') || nameLower.includes('stoxx') ||
+          nameLower.includes('s&p') || nameLower.includes('nasdaq') ||
+          potLower === 'funds' || potLower.includes('etf')
+        ) {
           type = 'Equity ETF';
-        }
-        // Check for stocks
-        else if (potLower === 'stocks' || potLower === 'groei' || assetsLower === 'aandelen' || isin) {
-          // Distinguish between individual stocks and ETFs in the GROEI pot
-          if (nameLower.includes('vanguard') || nameLower.includes('ishares') || nameLower.includes('etf')) {
+        } else if (
+          potLower.includes('stock') || potLower === 'groei' || potLower.includes('aandelen') ||
+          potLower.includes('equity') || isin || symbol
+        ) {
+          // Could still be an ETF that slipped through
+          if (nameLower.includes('etf') || nameLower.includes('vanguard') || nameLower.includes('ishares')) {
             type = 'Equity ETF';
           } else {
             type = 'Stock';
           }
         }
-        
-        // Try to match ISIN by product name if not provided
+
+        // Enrich ISIN if missing
         if (!isin) {
-          isin = matchIsinByName(name);
+          isin = matchIsinByName(name) || matchIsinByName(symbol);
         }
-        
+
         return {
-          pot,
-          name,
+          pot: pot || type,
+          name: name || symbol || 'Unknown',
           isin,
+          symbol: symbol || '',
           mktVal,
           quantity,
-          portfolioWeight: parseFloat(row['Ptf Wgt %'] || row['Portfolio weight %'] || '0') || 0,
-          unrealizedPL: parseFloat((row['Unr P&L'] || '0').toString().replace(/,/g, '')) || 0,
+          portfolioWeight: parseNumber(findCol(row, ['Ptf Wgt %', 'Portfolio weight %', 'Weight', '% of NAV', 'Percent of NAV'])),
+          unrealizedPL: parseNumber(findCol(row, ['Unr P&L', 'Unrealized P&L', 'P&L'])),
           unrealizedPLPct,
-          currency,
+          currency: (currency || 'EUR').toUpperCase().slice(0, 3),
           type,
           price,
           assets,
+          detectedFormat: detected,
         };
       }).filter(row => row !== null);
     };
-    
-    // Match ISIN by product name for CSVs without ISIN column
-    // This is a generic mapping of common securities - not personal data
+
+    // Expanded name → ISIN mapping (common EU + US ETFs & large caps)
     const matchIsinByName = (name) => {
+      if (!name) return '';
       const nameLower = name.toLowerCase();
-      
-      // Common securities name patterns to ISIN mapping
+
       const nameToIsin = {
-        // Common ETF patterns
+        // Popular UCITS ETFs
         'ultrashort bond': 'IE00BCRY6227',
+        'ultrashort': 'IE00BCRY6227',
         's&p 500': 'IE00B3XXRP09',
+        'sp500': 'IE00B3XXRP09',
+        'vanguard s&p': 'IE00B3XXRP09',
         'developed world': 'IE00BKX55T58',
         'ftse developed': 'IE00BKX55T58',
         'emerging market': 'IE00B3VVMM84',
         'ftse emerging': 'IE00B3VVMM84',
         'msci world': 'IE00B4L5Y983',
+        'core msci world': 'IE00B4L5Y983',
         'stoxx 600': 'LU0378449770',
-        
-        // Common US stocks patterns
+        'stoxx europe 600': 'LU0378449770',
+        'msci europe': 'IE00B4K48X80',
+        'ftse all-world': 'IE00B3RBWM25',
+        'all world': 'IE00B3RBWM25',
+        'nasdaq 100': 'IE00B53SZB19',
+        'msci usa': 'IE00B5BMR087',
+        'core s&p 500': 'IE00B5BMR087',
+
+        // US large caps
         'alphabet': 'US02079K1079',
         'google': 'US02079K1079',
         'berkshire': 'US0846707026',
@@ -231,20 +375,29 @@
         'meta': 'US30303M1027',
         'facebook': 'US30303M1027',
         'nvidia': 'US67066G1040',
-        
-        // Common EU stocks patterns
+        'jpmorgan': 'US46625H1005',
+        'visa': 'US92826C8394',
+        'mastercard': 'US57636Q1040',
+
+        // EU large caps
         'asml': 'NL0010273215',
-        'total': 'FR0000120271',
+        'totalenergies': 'FR0000120271',
+        'total ': 'FR0000120271',
         'sap': 'DE0007164600',
         'sofina': 'BE0003717312',
+        'lvmh': 'FR0000121014',
+        'nestle': 'CH0038863350',
+        'novartis': 'CH0012005267',
+        'roche': 'CH0012032048',
+        'siemens': 'DE0007236101',
+        'allianz': 'DE0008404005',
+        'airbus': 'NL0000235190',
+        'linde': 'IE00BZ12WP82',
       };
-      
+
       for (const [key, isin] of Object.entries(nameToIsin)) {
-        if (nameLower.includes(key)) {
-          return isin;
-        }
+        if (nameLower.includes(key)) return isin;
       }
-      
       return '';
     };
 
@@ -915,20 +1068,21 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
             console.error('❌ Free APIs also failed:', freeErr);
           }
           
-         // Last resort: use CSV data as-is
-const csvFxRate = (() => {
-  const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
-  return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
-})();
+          // Last resort: use CSV data as-is
+          const csvFxRate = (() => {
+            const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' && row['X Rate']);
+            return parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, '')) || 1.17;
+          })();
 
-setLoadingStatus('Using CSV data (APIs unavailable)...');
-setUsingFallback(true);
-return {
-  securities: {}, // Empty = will use CSV mktVal
-  eurUsd: csvFxRate || fxRate,
-  benchmark: benchmarkData || generateBenchmarkData()
-};
-          
+          setLoadingStatus('Using CSV data (APIs unavailable)...');
+          setUsingFallback(true);
+          return {
+            securities: {}, // Empty = will use CSV mktVal
+            eurUsd: csvFxRate || fxRate,
+            benchmark: benchmarkData || generateBenchmarkData()
+          };
+        }
+      };
 
       const handleFile = useCallback(async (file) => {
         if (!file) return;
@@ -945,19 +1099,20 @@ return {
             const transformed = transformBankData(rawData);
             
             if (transformed.length === 0) {
-              setError('Could not parse any holdings from the CSV.');
+              setError('Could not parse any holdings from the CSV. Try renaming columns to Name, ISIN, Quantity, Value or check the supported formats in the README.');
               setIsLoading(false);
               return;
             }
             
+            console.log(`✅ Parsed ${transformed.length} holdings (format: ${transformed[0]?.detectedFormat || 'unknown'})`);
             setPortfolioData(transformed);
             // Extract actual EUR/USD rate from CSV (look for X Rate column in USD positions)
-        const csvFxRate = (() => {
-        const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' || row['X Rate']);
-        const rate = parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, ''));
-        return isNaN(rate) ? 1.17 : rate;
-      })();
-      setFxRate(csvFxRate);
+            const csvFxRate = (() => {
+              const usdRow = rawData.find(row => row['Pos Cur'] === 'USD' || row['X Rate']);
+              const rate = parseFloat((usdRow?.['X Rate'] || '1.17').toString().replace(/,/g, ''));
+              return isNaN(rate) ? 1.17 : rate;
+            })();
+            setFxRate(csvFxRate);
             setDataDate(new Date().toLocaleDateString('en-GB', { 
               day: 'numeric', month: 'short', year: 'numeric' 
             }));
