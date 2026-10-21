@@ -95,7 +95,9 @@
 
     // Find first matching column from a list of possible normalized names
     const findCol = (row, candidates) => {
-      const keys = Object.keys(row);
+      // Symbol-only headers ("=", "-", "+/-") normalize to "" and single letters ("X")
+      // would otherwise fuzzy-match every candidate.
+      const keys = Object.keys(row).filter(k => normalizeHeader(k).length >= 2);
       for (const cand of candidates) {
         const normCand = normalizeHeader(cand);
         for (const k of keys) {
@@ -168,6 +170,27 @@
       }
       values.push(current.trim());
       return values;
+    };
+
+    // Transaction-history exports list buys/sells/dividends, not current positions
+    const TRANSACTION_TYPES = new Set([
+      'aankoop', 'verkoop', 'dividend', 'deposito', 'opname', 'coupon', 'storting',
+      'buy', 'sell', 'purchase', 'sale', 'deposit', 'withdrawal', 'interest',
+      'achat', 'vente', 'kauf', 'verkauf', 'dividende', 'ausschüttung',
+    ]);
+    const isTransactionExport = (rawData) => {
+      if (!rawData || rawData.length === 0) return false;
+      const headers = Object.keys(rawData[0]);
+      const normHeaders = headers.map(normalizeHeader);
+      if (normHeaders.some(h => h.includes('position value') || h.includes('mkt val') || h.includes('market value'))) {
+        return false;
+      }
+      return headers.some(h => {
+        const values = rawData.map(r => String(r[h] || '').trim().toLowerCase()).filter(Boolean);
+        if (values.length === 0) return false;
+        const hits = values.filter(v => TRANSACTION_TYPES.has(v)).length;
+        return hits / values.length >= 0.8;
+      });
     };
 
     // ── Main transform ────────────────────────────────────────────
@@ -1096,6 +1119,11 @@ CRITICAL: Respond with ONLY valid JSON, no markdown, no explanation, just the JS
           try {
             const text = e.target.result;
             const rawData = parseCSV(text);
+            if (isTransactionExport(rawData)) {
+              setError('This looks like a transaction history export (buys, sells, dividends), not a portfolio overview. Please export your current positions / holdings from your bank instead and upload that file.');
+              setIsLoading(false);
+              return;
+            }
             const transformed = transformBankData(rawData);
             
             if (transformed.length === 0) {
