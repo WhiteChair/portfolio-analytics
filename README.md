@@ -80,6 +80,8 @@ Works with many common EU / neo-broker exports. The parser auto-detects delimite
 | **Trade Republic / Scalable Capital style** | Name / Product, (ISIN), Quantity, Current Value / Value, Performance % |
 | **Generic** | Any combination of Name/Product + (ISIN or Symbol) + Quantity + Value/Market Value + optional Currency |
 
+> **Use a positions / portfolio export, not a transaction history.** Exports that list operations (Aankoop / Verkoop / Dividend / Deposito / Opname, Buy / Sell, ...) don't contain current holdings and are rejected with an explanatory message.
+
 ---
 
 ## 💡 Data Sources
