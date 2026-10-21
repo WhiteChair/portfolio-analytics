@@ -250,7 +250,7 @@
             type: 'Interest',
             gross: accrInt,
             fees, taxes,
-            net: netAmount && quantity ? netAmount - quantity : accrInt - fees - taxes,
+            net: Math.round((netAmount && quantity ? netAmount - quantity : accrInt - fees - taxes) * 100) / 100,
           });
         } else {
           skipped[kind] = (skipped[kind] || 0) + 1;
@@ -1216,7 +1216,7 @@
                   />
                   <Legend formatter={name => `${name} income (in EUR)`} />
                   {currencies.map(c => (
-                    <Bar key={c} dataKey={c} stackId="income" fill={CURRENCY_COLORS[c] || '#94a3b8'} />
+                    <Bar key={c} dataKey={c} stackId="income" fill={CURRENCY_COLORS[c] || '#94a3b8'} isAnimationActive={false} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
