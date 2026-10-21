@@ -80,6 +80,17 @@ Works with many common EU / neo-broker exports. The parser auto-detects delimite
 | **Trade Republic / Scalable Capital style** | Name / Product, (ISIN), Quantity, Current Value / Value, Performance % |
 | **Generic** | Any combination of Name/Product + (ISIN or Symbol) + Quantity + Value/Market Value + optional Currency |
 
+### 💶 Income report (transaction history exports)
+
+Uploading a **transaction history** export (operations such as Aankoop / Verkoop / Dividend / Deposito / Opname, Buy / Sell, ...) opens an income report instead of the portfolio dashboard:
+
+- **Dividends / coupons** are counted at the bank's net amount (after withholding tax and fees).
+- **Matured term deposits** (`Opname` of a `Termijnrekening`) count only their net interest (net amount minus principal).
+- Income is split per currency (EUR, USD, ...) and totalled in EUR. Foreign-currency payments are converted at the ECB reference rate of the payment date ([Frankfurter API](https://frankfurter.dev)).
+- Purchases, sales and new deposits are not income and are listed as excluded.
+
+Transaction exports don't contain current holdings — upload a positions export for the portfolio dashboard.
+
 ---
 
 ## 💡 Data Sources
